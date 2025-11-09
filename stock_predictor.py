@@ -188,9 +188,9 @@ class StockPredictor:
         """Build the LSTM model"""
         self.model = LSTMPredictor(
             input_size=input_size,
-            hidden_size=128,
+            hidden_size=256,
             num_layers=2,
-            dropout=0.2
+            dropout=0.3
         ).to(self.device)
 
         print(f"Model built and moved to {self.device}")
@@ -198,7 +198,7 @@ class StockPredictor:
 
         return self.model
 
-    def train(self, epochs=50, batch_size=32, learning_rate=0.001, direction_weight=2.0, verbose=True):
+    def train(self, epochs=50, batch_size=32, learning_rate=0.001, direction_weight=5.0, verbose=True):
         """
         Train the model with multi-task learning (price + direction)
 
@@ -231,9 +231,14 @@ class StockPredictor:
         if self.model is None:
             self.build_model(input_size=X.shape[2])
 
+        # Calculate class weights for imbalanced data
+        unique, counts = np.unique(dir_train, return_counts=True)
+        total = len(dir_train)
+        class_weights = torch.FloatTensor([total / (len(unique) * counts[i]) for i in range(len(unique))]).to(self.device)
+
         # Loss functions
         price_criterion = nn.MSELoss()
-        direction_criterion = nn.CrossEntropyLoss()
+        direction_criterion = nn.CrossEntropyLoss(weight=class_weights)
 
         optimizer = torch.optim.Adam(self.model.parameters(), lr=learning_rate)
         scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
@@ -246,9 +251,19 @@ class StockPredictor:
         train_dir_accs = []
         test_dir_accs = []
 
+        # Early stopping
+        best_dir_acc = 0
+        patience = 15
+        patience_counter = 0
+        best_model_state = None
+
+        up_days = np.sum(dir_train == 1)
+        down_days = np.sum(dir_train == 0)
         print(f"\nTraining on {len(train_dataset)} samples, testing on {len(test_dataset)} samples")
+        print(f"Direction distribution: {up_days} up days ({up_days/len(dir_train)*100:.1f}%), {down_days} down days ({down_days/len(dir_train)*100:.1f}%)")
         print(f"Multi-task learning: Price prediction + Direction classification")
-        print(f"Direction weight: {direction_weight}x")
+        print(f"Direction weight: {direction_weight}x (class-weighted)")
+        print(f"Early stopping: enabled (patience={patience})")
         print(f"{'='*60}")
 
         for epoch in range(epochs):
@@ -276,6 +291,8 @@ class StockPredictor:
                 # Backward pass
                 optimizer.zero_grad()
                 loss.backward()
+                # Gradient clipping to prevent exploding gradients
+                torch.nn.utils.clip_grad_norm_(self.model.parameters(), max_norm=1.0)
                 optimizer.step()
 
                 train_loss += loss.item()
@@ -323,9 +340,26 @@ class StockPredictor:
             # Learning rate scheduling
             scheduler.step(test_loss)
 
-            if verbose and (epoch + 1) % 5 == 0:
-                print(f"Epoch [{epoch+1}/{epochs}] - Loss: {train_loss:.4f}/{test_loss:.4f} - "
-                      f"Dir Acc: {train_dir_acc:.1f}%/{test_dir_acc:.1f}%")
+            # Early stopping based on direction accuracy
+            if test_dir_acc > best_dir_acc:
+                best_dir_acc = test_dir_acc
+                patience_counter = 0
+                best_model_state = self.model.state_dict().copy()
+                if verbose and (epoch + 1) % 5 == 0:
+                    print(f"Epoch [{epoch+1}/{epochs}] - Loss: {train_loss:.4f}/{test_loss:.4f} - "
+                          f"Dir Acc: {train_dir_acc:.1f}%/{test_dir_acc:.1f}% ⭐ NEW BEST")
+            else:
+                patience_counter += 1
+                if verbose and (epoch + 1) % 5 == 0:
+                    print(f"Epoch [{epoch+1}/{epochs}] - Loss: {train_loss:.4f}/{test_loss:.4f} - "
+                          f"Dir Acc: {train_dir_acc:.1f}%/{test_dir_acc:.1f}%")
+
+                if patience_counter >= patience:
+                    print(f"\nEarly stopping triggered after {epoch+1} epochs")
+                    print(f"Best direction accuracy: {best_dir_acc:.2f}%")
+                    # Restore best model
+                    self.model.load_state_dict(best_model_state)
+                    break
 
         print(f"{'='*60}")
         print(f"Training completed!")
