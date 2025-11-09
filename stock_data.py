@@ -7,6 +7,7 @@ import yfinance as yf
 import pandas as pd
 import numpy as np
 from datetime import datetime, timedelta
+from vaderSentiment.vaderSentiment import SentimentIntensityAnalyzer
 
 
 class StockDataFetcher:
@@ -23,6 +24,8 @@ class StockDataFetcher:
         self.symbol = symbol.upper()
         self.period = period
         self.data = None
+        self.sentiment_analyzer = SentimentIntensityAnalyzer()
+        self.news_data = []
 
     def fetch_data(self):
         """Fetch historical stock data"""
@@ -39,6 +42,104 @@ class StockDataFetcher:
         except Exception as e:
             print(f"✗ Error fetching data for {self.symbol}: {e}")
             return None
+
+    def fetch_news(self, max_articles=100):
+        """
+        Fetch recent news articles for the stock
+
+        Args:
+            max_articles: Maximum number of articles to fetch
+
+        Returns:
+            List of news articles with sentiment scores
+        """
+        try:
+            ticker = yf.Ticker(self.symbol)
+            news = ticker.news
+
+            if not news:
+                print(f"⚠ No news found for {self.symbol}")
+                return []
+
+            self.news_data = []
+            for article in news[:max_articles]:
+                # Extract article info
+                title = article.get('title', '')
+                published = article.get('providerPublishTime', 0)
+
+                # Analyze sentiment
+                sentiment_scores = self.sentiment_analyzer.polarity_scores(title)
+
+                self.news_data.append({
+                    'title': title,
+                    'published': datetime.fromtimestamp(published),
+                    'sentiment_compound': sentiment_scores['compound'],
+                    'sentiment_pos': sentiment_scores['pos'],
+                    'sentiment_neg': sentiment_scores['neg'],
+                    'sentiment_neu': sentiment_scores['neu']
+                })
+
+            print(f"✓ Fetched {len(self.news_data)} news articles for {self.symbol}")
+            return self.news_data
+
+        except Exception as e:
+            print(f"⚠ Error fetching news for {self.symbol}: {e}")
+            return []
+
+    def calculate_sentiment_features(self):
+        """
+        Calculate sentiment-based features from news articles
+        Adds sentiment features to each day in the historical data
+        """
+        if self.data is None:
+            return None
+
+        if not self.news_data:
+            print("Fetching news for sentiment analysis...")
+            self.fetch_news()
+
+        # Initialize sentiment columns with neutral values
+        self.data['News_Sentiment'] = 0.0
+        self.data['News_Positive'] = 0.0
+        self.data['News_Negative'] = 0.0
+        self.data['News_Volume'] = 0
+        self.data['Sentiment_Momentum'] = 0.0
+
+        if not self.news_data:
+            print("⚠ No news data available - using neutral sentiment")
+            return self.data
+
+        # Create a DataFrame from news for easier processing
+        news_df = pd.DataFrame(self.news_data)
+        news_df['date'] = pd.to_datetime(news_df['published']).dt.date
+
+        # For each day in our stock data, calculate sentiment metrics
+        for idx in self.data.index:
+            date = idx.date()
+
+            # Get news from last 7 days (rolling window)
+            start_date = date - timedelta(days=7)
+            recent_news = news_df[
+                (news_df['date'] >= start_date) & (news_df['date'] <= date)
+            ]
+
+            if len(recent_news) > 0:
+                # Average sentiment
+                self.data.loc[idx, 'News_Sentiment'] = recent_news['sentiment_compound'].mean()
+                self.data.loc[idx, 'News_Positive'] = recent_news['sentiment_pos'].mean()
+                self.data.loc[idx, 'News_Negative'] = recent_news['sentiment_neg'].mean()
+                self.data.loc[idx, 'News_Volume'] = len(recent_news)
+
+        # Calculate sentiment momentum (change in sentiment over time)
+        self.data['Sentiment_Momentum'] = self.data['News_Sentiment'].diff(5)
+
+        # Fill any remaining NaN values with 0
+        sentiment_cols = ['News_Sentiment', 'News_Positive', 'News_Negative',
+                         'News_Volume', 'Sentiment_Momentum']
+        self.data[sentiment_cols] = self.data[sentiment_cols].fillna(0)
+
+        print("✓ Sentiment features calculated")
+        return self.data
 
     def calculate_sma(self, window=20):
         """Calculate Simple Moving Average"""
@@ -233,7 +334,10 @@ class StockDataFetcher:
         # Volatility ratio
         self.data['Volatility_Ratio'] = self.data['ATR'] / self.data['Close']
 
-        print("✓ All indicators calculated (including enhanced direction features)")
+        # === News Sentiment Features ===
+        self.calculate_sentiment_features()
+
+        print("✓ All indicators calculated (including enhanced direction features + news sentiment)")
 
         return self.data
 
@@ -259,7 +363,28 @@ class StockDataFetcher:
             'volume_ratio': latest.get('Volume_Ratio', None),
             'momentum': latest.get('Momentum', None),
             'atr': latest.get('ATR', None),
+            'news_sentiment': latest.get('News_Sentiment', 0),
+            'news_volume': latest.get('News_Volume', 0),
+            'sentiment_momentum': latest.get('Sentiment_Momentum', 0),
         }
+
+    def get_recent_news(self, num_articles=5):
+        """
+        Get recent news articles with sentiment
+
+        Args:
+            num_articles: Number of recent articles to return
+
+        Returns:
+            List of recent news articles with sentiment
+        """
+        if not self.news_data:
+            self.fetch_news()
+
+        # Sort by published date (most recent first)
+        sorted_news = sorted(self.news_data, key=lambda x: x['published'], reverse=True)
+
+        return sorted_news[:num_articles]
 
     def get_summary(self):
         """Get a technical summary of the stock"""
@@ -308,6 +433,32 @@ class StockDataFetcher:
 
         summary += f"\n--- Volume ---\n"
         summary += f"Volume Ratio: {indicators['volume_ratio']:.2f}x average\n"
+
+        summary += f"\n--- News Sentiment ---\n"
+        sentiment = indicators['news_sentiment']
+        summary += f"Sentiment Score: {sentiment:.3f} "
+
+        if sentiment > 0.3:
+            summary += "(Very Positive 🚀)\n"
+        elif sentiment > 0.1:
+            summary += "(Positive 📈)\n"
+        elif sentiment < -0.3:
+            summary += "(Very Negative 📉)\n"
+        elif sentiment < -0.1:
+            summary += "(Negative ⚠️)\n"
+        else:
+            summary += "(Neutral ➡️)\n"
+
+        summary += f"News Volume (7d): {int(indicators['news_volume'])} articles\n"
+        summary += f"Sentiment Trend: {indicators['sentiment_momentum']:+.3f}\n"
+
+        # Show recent headlines
+        if self.news_data:
+            recent = self.get_recent_news(3)
+            summary += f"\nRecent Headlines:\n"
+            for i, article in enumerate(recent, 1):
+                sentiment_label = "📈" if article['sentiment_compound'] > 0 else "📉" if article['sentiment_compound'] < 0 else "➡️"
+                summary += f"  {i}. {sentiment_label} {article['title'][:60]}...\n"
 
         summary += f"{'='*60}\n"
 

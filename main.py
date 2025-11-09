@@ -29,8 +29,8 @@ def train_and_predict(ticker, period='2y', epochs=50, sequence_length=60):
     print("Step 1: Fetching and preparing data...")
     predictor.prepare_data(period=period)
 
-    # Display current technical analysis
-    print("\nCurrent Technical Analysis:")
+    # Display current technical analysis (including news sentiment)
+    print("\nCurrent Technical Analysis (with News Sentiment):")
     print(predictor.data_fetcher.get_summary())
 
     # Train model
@@ -48,6 +48,11 @@ def train_and_predict(ticker, period='2y', epochs=50, sequence_length=60):
     price_change = next_day_price - current_price
     percent_change = (price_change / current_price) * 100
 
+    # Get latest sentiment
+    latest_indicators = predictor.data_fetcher.get_latest_indicators()
+    sentiment = latest_indicators.get('news_sentiment', 0)
+    news_volume = latest_indicators.get('news_volume', 0)
+
     # Final summary
     print(f"\n{'='*70}")
     print(f"PREDICTION SUMMARY FOR {ticker}")
@@ -62,6 +67,21 @@ def train_and_predict(ticker, period='2y', epochs=50, sequence_length=60):
         print(f"  Signal: 🟢 BUY (Bullish)")
     else:
         print(f"  Signal: 🔴 SELL (Bearish)")
+
+    # Show news sentiment influence
+    print(f"\nNews Sentiment Analysis:")
+    print(f"  Sentiment Score: {sentiment:.3f} ", end='')
+    if sentiment > 0.3:
+        print("(Very Positive 🚀)")
+    elif sentiment > 0.1:
+        print("(Positive 📈)")
+    elif sentiment < -0.3:
+        print("(Very Negative 📉)")
+    elif sentiment < -0.1:
+        print("(Negative ⚠️)")
+    else:
+        print("(Neutral ➡️)")
+    print(f"  Recent News Volume: {int(news_volume)} articles (7 days)")
 
     print(f"\nModel Performance:")
     print(f"  RMSE: ${metrics['rmse']:.2f}")

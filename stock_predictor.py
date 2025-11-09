@@ -121,7 +121,7 @@ class StockPredictor:
         # Drop NaN values
         self.df = self.df.dropna()
 
-        # Select features for prediction (including new direction-focused features)
+        # Select features for prediction (including new direction-focused features + sentiment)
         self.feature_columns = [
             'Open', 'High', 'Low', 'Close', 'Volume',
             'SMA_20', 'SMA_50', 'EMA_12', 'EMA_26',
@@ -132,7 +132,10 @@ class StockPredictor:
             'ROC_5', 'ROC_10', 'SMA_Cross', 'EMA_Cross',
             'BB_Position', 'Plus_DM', 'Minus_DM', 'DI_Diff',
             'Stochastic', 'Williams_R', 'CCI', 'MFI',
-            'Price_Acceleration', 'Volatility_Ratio'
+            'Price_Acceleration', 'Volatility_Ratio',
+            # News sentiment features
+            'News_Sentiment', 'News_Positive', 'News_Negative',
+            'News_Volume', 'Sentiment_Momentum'
         ]
 
         print(f"Data prepared: {len(self.df)} samples with {len(self.feature_columns)} features")
