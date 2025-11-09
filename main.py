@@ -43,7 +43,7 @@ def train_and_predict(ticker, period='2y', epochs=50, sequence_length=60):
 
     # Predict next day
     print("\nStep 4: Making prediction...")
-    next_day_price = predictor.predict_next_day()
+    next_day_price, direction, confidence = predictor.predict_next_day()
     current_price = predictor.df['Close'].iloc[-1]
     price_change = next_day_price - current_price
     percent_change = (price_change / current_price) * 100
@@ -56,8 +56,9 @@ def train_and_predict(ticker, period='2y', epochs=50, sequence_length=60):
     print(f"  Current Price: ${current_price:.2f}")
     print(f"  Predicted Next Day: ${next_day_price:.2f}")
     print(f"  Expected Change: ${price_change:.2f} ({percent_change:+.2f}%)")
+    print(f"  Predicted Direction: {direction} (Confidence: {confidence:.1%})")
 
-    if percent_change > 0:
+    if direction == "UP":
         print(f"  Signal: 🟢 BUY (Bullish)")
     else:
         print(f"  Signal: 🔴 SELL (Bearish)")
@@ -67,6 +68,7 @@ def train_and_predict(ticker, period='2y', epochs=50, sequence_length=60):
     print(f"  MAE: ${metrics['mae']:.2f}")
     print(f"  MAPE: {metrics['mape']:.2f}%")
     print(f"  Direction Accuracy: {metrics['direction_accuracy']:.2f}%")
+    print(f"  Price-based Dir Accuracy: {metrics['price_direction_accuracy']:.2f}%")
 
     print(f"\n{'='*70}\n")
 
