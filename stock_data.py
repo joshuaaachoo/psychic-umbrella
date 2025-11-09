@@ -166,7 +166,74 @@ class StockDataFetcher:
         true_range = pd.concat([high_low, high_close, low_close], axis=1).max(axis=1)
         self.data['ATR'] = true_range.rolling(window=14).mean()
 
-        print("✓ All indicators calculated")
+        # === Enhanced Direction-Focused Features ===
+
+        # Rate of Change (ROC) - multiple periods
+        self.data['ROC_5'] = ((self.data['Close'] - self.data['Close'].shift(5)) /
+                              self.data['Close'].shift(5)) * 100
+        self.data['ROC_10'] = ((self.data['Close'] - self.data['Close'].shift(10)) /
+                               self.data['Close'].shift(10)) * 100
+
+        # Trend strength using moving average crossovers
+        self.data['SMA_Cross'] = self.data['SMA_20'] - self.data['SMA_50']
+        self.data['EMA_Cross'] = self.data['EMA_12'] - self.data['EMA_26']
+
+        # Price position relative to Bollinger Bands (0-1 scale)
+        bb_range = self.data['BB_Upper'] - self.data['BB_Lower']
+        self.data['BB_Position'] = (self.data['Close'] - self.data['BB_Lower']) / bb_range
+
+        # Directional Movement Index (DMI)
+        high_diff = self.data['High'].diff()
+        low_diff = -self.data['Low'].diff()
+
+        plus_dm = np.where((high_diff > low_diff) & (high_diff > 0), high_diff, 0)
+        minus_dm = np.where((low_diff > high_diff) & (low_diff > 0), low_diff, 0)
+
+        self.data['Plus_DM'] = pd.Series(plus_dm, index=self.data.index).rolling(window=14).mean()
+        self.data['Minus_DM'] = pd.Series(minus_dm, index=self.data.index).rolling(window=14).mean()
+
+        # Directional Indicator
+        self.data['DI_Diff'] = self.data['Plus_DM'] - self.data['Minus_DM']
+
+        # Stochastic Oscillator - shows momentum
+        low_14 = self.data['Low'].rolling(window=14).min()
+        high_14 = self.data['High'].rolling(window=14).max()
+        self.data['Stochastic'] = 100 * (self.data['Close'] - low_14) / (high_14 - low_14)
+
+        # Williams %R - another momentum indicator
+        self.data['Williams_R'] = -100 * (high_14 - self.data['Close']) / (high_14 - low_14)
+
+        # Commodity Channel Index (CCI) - identifies cyclical trends
+        typical_price = (self.data['High'] + self.data['Low'] + self.data['Close']) / 3
+        sma_tp = typical_price.rolling(window=20).mean()
+        mad = typical_price.rolling(window=20).apply(lambda x: np.abs(x - x.mean()).mean())
+        self.data['CCI'] = (typical_price - sma_tp) / (0.015 * mad)
+
+        # Money Flow Index (MFI) - volume-weighted RSI
+        typical_price_mfi = (self.data['High'] + self.data['Low'] + self.data['Close']) / 3
+        money_flow = typical_price_mfi * self.data['Volume']
+
+        positive_flow = pd.Series(0.0, index=self.data.index)
+        negative_flow = pd.Series(0.0, index=self.data.index)
+
+        for i in range(1, len(self.data)):
+            if typical_price_mfi.iloc[i] > typical_price_mfi.iloc[i-1]:
+                positive_flow.iloc[i] = money_flow.iloc[i]
+            else:
+                negative_flow.iloc[i] = money_flow.iloc[i]
+
+        positive_mf = positive_flow.rolling(window=14).sum()
+        negative_mf = negative_flow.rolling(window=14).sum()
+        mfi_ratio = positive_mf / negative_mf
+        self.data['MFI'] = 100 - (100 / (1 + mfi_ratio))
+
+        # Price acceleration (second derivative)
+        self.data['Price_Acceleration'] = self.data['Close'].diff().diff()
+
+        # Volatility ratio
+        self.data['Volatility_Ratio'] = self.data['ATR'] / self.data['Close']
+
+        print("✓ All indicators calculated (including enhanced direction features)")
 
         return self.data
 
