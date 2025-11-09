@@ -140,10 +140,10 @@ def compare_stocks(tickers, period='1y'):
 
         results.append({
             'Ticker': ticker,
-            'Price': latest['Close'],
-            'RSI': latest.get('RSI', 0),
-            'MACD': latest.get('MACD', 0),
-            'Volume_Ratio': latest.get('Volume_Ratio', 0)
+            'Price': latest['close_price'],
+            'RSI': latest.get('rsi', 0),
+            'MACD': latest.get('macd', 0),
+            'Volume_Ratio': latest.get('volume_ratio', 0)
         })
 
     # Display comparison
